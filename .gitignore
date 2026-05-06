@@ -1,0 +1,39 @@
+# Secrets
+.env
+*.key
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Data — too big and/or messy to commit; reproducible from scripts
+data/raw/
+data/cleaned/
+data/interim/
+*.parquet
+*.csv
+!data/samples/*.csv
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Logs / reports (regenerate each run)
+logs/
+*.log
+reports/*.json
+!reports/.gitkeep
+
+# Streamlit
+.streamlit/secrets.toml

@@ -1,0 +1,16 @@
+# LLM clients
+groq>=0.13.0
+
+# Config
+python-dotenv>=1.0.0
+
+# Data engineering
+pandas>=2.2.0
+pyarrow>=15.0.0
+requests>=2.32.0
+
+# Validation
+pydantic>=2.7.0
+
+# Dev / testing
+pytest>=8.0.0
