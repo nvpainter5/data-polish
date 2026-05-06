@@ -2,7 +2,22 @@
 
 > An AI-augmented data engineering pipeline that ingests messy real-world tabular data, profiles it deterministically, lets an LLM propose cleaning rules in a strict typed schema, applies them through deterministic safety gates, and ships a validated clean dataset plus a full audit trail.
 
-Status: **Phase 1 + Phase 2 complete.** Phase 3 (Streamlit demo + AWS Lambda + S3 deployment) up next.
+Status: **Phase 1 + Phase 2 complete.** Phase 3a (Streamlit demo) shipped. Phase 3b (AWS Lambda + S3 deployment) up next.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    raw[(Raw CSV<br/>50k rows, 44 cols)] --> profile[Deterministic profiler]
+    profile -- slim payload --> phase1{{Phase 1: Static plan<br/>one LLM call}}
+    profile -- tool calls --> phase2{{Phase 2: Agent loop<br/>LLM + tools}}
+    phase1 --> gate[Safety-gated apply]
+    phase2 --> gate
+    gate --> cleaned[(Cleaned parquet)]
+    gate --> audit[Audit JSON]
+```
+
+Both Phase 1 and Phase 2 feed the same deterministic apply layer — the LLM proposes, deterministic code disposes, regardless of which mode produced the proposal.
 
 ## Why it's built this way
 
@@ -46,6 +61,16 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env and paste your real GROQ_API_KEY
 ```
+
+## Demo dashboard
+
+A Streamlit dashboard ships with the project for visualizing past runs. Useful for screenshots, demos, and debugging:
+
+```bash
+streamlit run app.py
+```
+
+Opens at `http://localhost:8501`. Five tabs: **Overview** (key metrics, LLM summary, agent run summary), **Profile** (per-column stats), **Cleaning plan (LLM)** (every proposed rule with confidence), **Audit (code)** (applied / skipped / failed with reasons), **Before / After** (side-by-side data samples for any column the pipeline modified).
 
 ## End-to-end run
 
@@ -130,6 +155,18 @@ Wrote audit:           reports/cleaning_audit_20260505_162032.json
 
 The `intersection_street_1` skip is the safety gate earning its keep — the LLM proposed the rule at high confidence, but a deterministic re-check of the column profile found no double-spaces and refused to run.
 
+## Phase 3b: AWS deployment
+
+The pipeline can run as an AWS Lambda triggered by S3 uploads. CSV lands in `s3://datapolish-raw/`, cleaned parquet + audit JSON write to `s3://datapolish-cleaned/`. Free-tier deployment.
+
+```
+You upload a CSV  ->  s3://datapolish-raw/  ->  Lambda (container)  ->  s3://datapolish-cleaned/cleaned/*.parquet
+                                                                                                  /cleaned/*.json
+```
+
+Code: `lambda/lambda_function.py`, `lambda/Dockerfile`, `template.yaml` (AWS SAM).
+Full step-by-step guide: [`docs/aws_deployment.md`](docs/aws_deployment.md).
+
 ## Phase 2: the autonomous agent
 
 Phase 2 turns the static Phase 1 pipeline into a tool-using agent. The LLM is given typed tools (`get_dataset_overview`, `get_column_profile`, `apply_rule`, `compare_before_after`, `finish`) and runs an iterative loop where it decides what to do next based on what it observes.
@@ -169,8 +206,8 @@ All LLM calls go through `LLMClient` in `src/datapolish/llm_client.py`. Today it
 - [x] Phase 0 — Scaffolding
 - [x] Phase 1 — Deterministic profiler + LLM-as-tool cleaning + safety-gated apply + validation
 - [x] Phase 2 — Tool-using autonomous agent that audits and repairs a fresh dataset
-- [ ] Phase 3a — Streamlit demo + write-up
-- [ ] Phase 3b — Deploy as AWS Lambda + S3 pipeline
+- [x] Phase 3a — Streamlit demo + write-up
+- [x] Phase 3b — AWS Lambda + S3 deployment (code shipped; deployment guide at `docs/aws_deployment.md`)
 
 ## Source data
 

@@ -40,6 +40,21 @@ DataPolish is a portfolio project Nirav is building during a job search. He's an
 - First run was conservative (only 3 columns fixed) because the overview was too thin. Second run with `issue_summary` hints in the overview drove thorough coverage: 18 rules applied, 1 mark_for_review (borough/park_borough denormalization Phase 1 had missed). 4 iterations using parallel tool calls.
 - Tests: 36 passing.
 
+## Where Phase 3a ended (May 2026)
+- `app.py` Streamlit dashboard at the project root with five tabs (Overview / Profile / Plan / Audit / Before-After).
+- Mermaid architecture diagram in README — renders natively on GitHub.
+- `docs/prompt_iterations.md` v3 entry capturing the agent's "thin overview led to under-exploration; hint-rich tools beat agentic discovery" lesson.
+- Run with `streamlit run app.py`.
+
+## Where Phase 3b ended (May 2026)
+- `lambda/lambda_function.py` Lambda handler implementing the Phase 1 pipeline: download CSV from S3 → profile → propose → apply → validate → upload cleaned parquet + audit JSON.
+- `lambda/Dockerfile` for container-image Lambda (10 GB ceiling, easier with pandas/pyarrow than zip).
+- `template.yaml` SAM template declaring the raw bucket, cleaned bucket, Lambda function (PackageType: Image), IAM policies, and S3 ObjectCreated trigger.
+- `lambda/requirements-lambda.txt` slimmer runtime requirements (no streamlit, pytest).
+- `docs/aws_deployment.md` step-by-step deployment guide.
+- `tests/test_lambda.py` test that mocks S3 + the LLM and runs the handler end-to-end with no AWS credentials.
+- Code is ready to deploy. Deployment requires AWS account + Docker Desktop + AWS SAM CLI installed; deferred to user when they're ready.
+
 ## Division of labor
 **Claude (Cowork) handles:**
 - Writing all Python code, file scaffolding, prompt design.

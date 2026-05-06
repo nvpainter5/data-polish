@@ -89,3 +89,59 @@ some changes don't take, and further prompt-stuffing risks overfitting to
 this specific dataset. Move remaining defensive logic into the
 deterministic apply step (Task #7), where we re-validate each proposed
 rule against the actual column profile before executing it.
+
+---
+
+## v3 — Phase 2 agent (2026-05-05)
+
+This entry covers a different system prompt than v1/v2 — the agent prompt
+in `src/datapolish/agent.py` (`AGENT_SYSTEM_PROMPT`), not the static-plan
+prompt in `cleaning.py`. Logged here because the lesson is the same shape:
+identify the failure, change one thing, re-run.
+
+**Problem:**
+First run was conservative. The agent inspected only 3 columns
+(`complaint_type`, `incident_address`, `location_type`), applied 3 rules,
+and called `finish` — missing 6+ columns Phase 1 had caught (`descriptor`,
+`descriptor_2`, `street_name`, `cross_street_*`, `resolution_description`,
+the `borough`/`park_borough` denormalization).
+
+Root cause: the `get_dataset_overview` tool returned only name, dtype,
+null_pct, unique_count for each column. The agent had no signal about
+*which* columns had casing or whitespace issues. It picked the obvious-
+by-name candidates and stopped.
+
+**Fix:**
+Two changes, made together:
+1. Enriched `get_dataset_overview` to compute and return an `issue_summary`
+   block: which columns have mixed_casing, double_spaces, whitespace_padding,
+   plus pairs of columns with identical distributions (denormalization
+   candidates). The hints are pre-computed deterministically from the
+   profile — same logic the safety gate uses, so the agent and the gate
+   agree on what's flagged.
+2. Rewrote `AGENT_SYSTEM_PROMPT` to use `issue_summary` as the workflow's
+   spine: "Apply set_case to EVERY column listed under mixed_casing,"
+   "Apply collapse_internal_whitespace to EVERY column listed under
+   double_spaces," etc.
+
+**Result:**
+- Iterations 11 → 4 (parallel tool calls became possible).
+- Tool calls 11 → 33 (more thorough coverage in fewer iterations).
+- Rules applied 3 → 18.
+- `borough`/`park_borough` denormalization caught (Phase 1 had missed
+  this twice through prompt iteration).
+- Zero false positives. All safety gates accepted.
+
+**Remaining:**
+- Agent applied set_case more aggressively than Phase 1 — `BROOKLYN` →
+  `Brooklyn`, addresses title-cased. Technically the safety gate accepted
+  these (a small number of title-case rows did exist in those columns),
+  but it's a more aggressive normalization than Phase 1's. Defensible
+  either way; product decision.
+
+**Decision:**
+Stop iterating. The lesson generalizes: **hint-rich tools beat agentic
+discovery.** A thin tool overview leads to under-exploration; a tool that
+pre-computes the analysis and surfaces hints lets the LLM focus on
+deciding what to do with the hints. This is the production pattern for
+LLM-driven workflows.

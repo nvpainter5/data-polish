@@ -12,5 +12,11 @@ requests>=2.32.0
 # Validation
 pydantic>=2.7.0
 
+# AWS SDK (runtime for Lambda, also useful for local dev scripts)
+boto3>=1.34.0
+
 # Dev / testing
 pytest>=8.0.0
+
+# Demo UI
+streamlit>=1.36.0

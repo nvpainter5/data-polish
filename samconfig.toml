@@ -1,0 +1,14 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "datapolish"
+resolve_s3 = true
+s3_prefix = "datapolish"
+region = "us-west-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "ResourcePrefix=\"datapolish\""
+image_repositories = ["CleanerFunction=022187637419.dkr.ecr.us-west-1.amazonaws.com/datapolish00782c1f/cleanerfunction798c2f5arepo"]
+
+[default.global.parameters]
+region = "us-west-1"

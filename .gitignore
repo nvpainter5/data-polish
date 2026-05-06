@@ -37,3 +37,6 @@ reports/*.json
 
 # Streamlit
 .streamlit/secrets.toml
+
+# AWS SAM build artifacts
+.aws-sam/

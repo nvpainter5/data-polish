@@ -1,0 +1,96 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >-
+  DataPolish — AI-augmented data cleaning pipeline. CSV uploads to the raw
+  bucket trigger a Lambda that profiles, lets an LLM propose cleaning rules,
+  applies them through deterministic safety gates, and writes parquet plus an
+  audit JSON to the cleaned bucket.
+
+Parameters:
+  GroqApiKey:
+    Type: String
+    NoEcho: true
+    Description: Groq API key for the LLM proposer.
+
+  ResourcePrefix:
+    Type: String
+    Default: datapolish
+    Description: Prefix for created resource names.
+
+Globals:
+  Function:
+    Timeout: 300
+    MemorySize: 1024
+    Architectures:
+      - arm64
+    Environment:
+      Variables:
+        LOG_LEVEL: INFO
+
+Resources:
+  RawBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${ResourcePrefix}-raw-${AWS::AccountId}"
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireOldRaw
+            Status: Enabled
+            ExpirationInDays: 30
+
+  CleanedBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${ResourcePrefix}-cleaned-${AWS::AccountId}"
+
+  CleanerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ResourcePrefix}-cleaner"
+      PackageType: Image
+      Environment:
+        Variables:
+          GROQ_API_KEY: !Ref GroqApiKey
+          # String template (not !Ref) to avoid the IAM-Role -> Bucket
+          # dependency that creates a circular reference with the S3 event.
+          CLEANED_BUCKET: !Sub "${ResourcePrefix}-cleaned-${AWS::AccountId}"
+      Policies:
+        # IMPORTANT: BucketName is the *string name*, not !Ref. Using !Ref
+        # here would create a Role -> Bucket dependency, which combined
+        # with the S3 event trigger forms a CloudFormation circular dep.
+        - S3ReadPolicy:
+            BucketName: !Sub "${ResourcePrefix}-raw-${AWS::AccountId}"
+        - S3WritePolicy:
+            BucketName: !Sub "${ResourcePrefix}-cleaned-${AWS::AccountId}"
+      Events:
+        RawCsvUploaded:
+          Type: S3
+          Properties:
+            Bucket: !Ref RawBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: suffix
+                    Value: .csv
+    Metadata:
+      Dockerfile: lambda/Dockerfile
+      DockerContext: .
+      DockerTag: latest
+
+Outputs:
+  RawBucketName:
+    Description: Bucket where you upload raw CSVs to trigger the pipeline.
+    Value: !Ref RawBucket
+
+  CleanedBucketName:
+    Description: Bucket where cleaned parquet + audit JSON are written.
+    Value: !Ref CleanedBucket
+
+  CleanerFunctionName:
+    Description: Lambda function name (for tail-logs / monitoring).
+    Value: !Ref CleanerFunction
+
+  CleanerFunctionArn:
+    Description: Lambda function ARN.
+    Value: !GetAtt CleanerFunction.Arn

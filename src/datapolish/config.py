@@ -11,12 +11,20 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-from dotenv import load_dotenv
+# `python-dotenv` is a dev convenience for loading `.env` locally.
+# It is NOT installed in the Lambda image (env vars come from AWS),
+# so the import is wrapped to fall back gracefully.
+try:
+    from dotenv import load_dotenv
 
-# Load `.env` from the project root the moment this module is imported.
-# `override=False` means real environment variables (e.g. on AWS Lambda
-# in Phase 3b) take precedence over `.env` — this matters in production.
-load_dotenv(override=False)
+    # Load `.env` from the project root the moment this module is imported.
+    # `override=False` means real environment variables (e.g. on AWS Lambda
+    # in Phase 3b) take precedence over `.env` — this matters in production.
+    load_dotenv(override=False)
+except ImportError:
+    # python-dotenv not available — assume env vars come from the runtime
+    # environment directly (Lambda, container, CI, etc.).
+    pass
 
 
 @dataclass(frozen=True)
