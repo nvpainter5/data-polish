@@ -23,7 +23,7 @@ DataPolish is a portfolio project Nirav is building during a job search. He's an
 
 ## Phases
 1. **Phase 1 — Pipeline + LLM-as-tool.** [COMPLETE] Profile, propose, apply, validate. Six runnable scripts wired together. 26 unit tests.
-2. **Phase 2 — Tool-using agent.** Wrap the cleaning logic as an autonomous agent (tools: `profile_column`, `propose_rule`, `apply_rule`, `validate`, `compare_before_after`).
+2. **Phase 2 — Tool-using agent.** [COMPLETE] 5 tools (overview, column profile, apply, compare, finish) wired through the same safety gates as Phase 1. Agent runs in 4 iterations using parallel tool calls, applies 18 rules, catches the borough/park_borough denormalization Phase 1 missed.
 3. **Phase 3a — Polish.** Streamlit demo, architecture diagram, README, LinkedIn post.
 4. **Phase 3b — AWS.** Deploy as Lambda triggered by S3 upload (free tier covers this easily).
 
@@ -32,6 +32,13 @@ DataPolish is a portfolio project Nirav is building during a job search. He's an
 - Two-layer safety: confidence gate (only `high` auto-applies) + per-operation gate (re-checks profile preconditions before executing). Demonstrated catching an LLM false positive (`intersection_street_1`) that slipped through both the prompt and the confidence gate.
 - Prompt iteration log lives at `docs/prompt_iterations.md` with the v1→v2 entry. Useful both as a debugging aid and a portfolio artifact.
 - Tests: 26 passing, < 1 second total runtime, no network or API calls in the suite.
+
+## Where Phase 2 ended (May 2026)
+- Agent module in `src/datapolish/agent.py` with 5 tools, system prompt, and loop. Runnable via `scripts/run_agent.py`.
+- LLM client gained `chat_with_tools()` returning a `ChatResponse` with optional `tool_calls`. Provider-agnostic interface preserved.
+- Same Phase 1 safety gates protect Phase 2's apply path — agent's `apply_rule` tool calls into `GATES` and `APPLIERS` from `apply.py`.
+- First run was conservative (only 3 columns fixed) because the overview was too thin. Second run with `issue_summary` hints in the overview drove thorough coverage: 18 rules applied, 1 mark_for_review (borough/park_borough denormalization Phase 1 had missed). 4 iterations using parallel tool calls.
+- Tests: 36 passing.
 
 ## Division of labor
 **Claude (Cowork) handles:**

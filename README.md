@@ -2,7 +2,7 @@
 
 > An AI-augmented data engineering pipeline that ingests messy real-world tabular data, profiles it deterministically, lets an LLM propose cleaning rules in a strict typed schema, applies them through deterministic safety gates, and ships a validated clean dataset plus a full audit trail.
 
-Status: **Phase 1 complete.** Phase 2 (autonomous tool-using agent) and Phase 3 (AWS Lambda + S3 deployment) up next.
+Status: **Phase 1 + Phase 2 complete.** Phase 3 (Streamlit demo + AWS Lambda + S3 deployment) up next.
 
 ## Why it's built this way
 
@@ -130,9 +130,23 @@ Wrote audit:           reports/cleaning_audit_20260505_162032.json
 
 The `intersection_street_1` skip is the safety gate earning its keep — the LLM proposed the rule at high confidence, but a deterministic re-check of the column profile found no double-spaces and refused to run.
 
+## Phase 2: the autonomous agent
+
+Phase 2 turns the static Phase 1 pipeline into a tool-using agent. The LLM is given typed tools (`get_dataset_overview`, `get_column_profile`, `apply_rule`, `compare_before_after`, `finish`) and runs an iterative loop where it decides what to do next based on what it observes.
+
+Same safety gates as Phase 1 — when the agent calls `apply_rule`, the gates re-validate the rule's preconditions exactly as before. Phase 1's defensive infrastructure becomes Phase 2's tooling without modification.
+
+Run with:
+
+```bash
+python scripts/run_agent.py
+```
+
+Architectural takeaway: a thin tool overview (just dtypes and null counts) led the agent to under-explore — it stopped after 3 fixes. Enriching `get_dataset_overview` with pre-computed `issue_summary` hints (which columns have mixed casing, double spaces, denormalization candidates) drove the agent to thorough coverage on the next run. **Hint-rich tools beat agentic discovery.**
+
 ## Tests
 
-26 unit tests, all running in under a second. No network or LLM calls in the test suite.
+36 unit tests, all running in under a second. No network or LLM calls in the test suite.
 
 ```bash
 pytest -v
@@ -144,6 +158,7 @@ Coverage:
 - slim payload construction (filters high-null columns, compact JSON)
 - apply step (confidence gate, per-operation safety gates, applied row counts)
 - post-apply validation (row count preservation, required columns, unique key uniqueness)
+- agent tools (overview with issue hints, column profile, apply via gates, mark_for_review, finish)
 
 ## Provider abstraction
 
@@ -153,7 +168,7 @@ All LLM calls go through `LLMClient` in `src/datapolish/llm_client.py`. Today it
 
 - [x] Phase 0 — Scaffolding
 - [x] Phase 1 — Deterministic profiler + LLM-as-tool cleaning + safety-gated apply + validation
-- [ ] Phase 2 — Tool-using autonomous agent that audits and repairs a fresh dataset
+- [x] Phase 2 — Tool-using autonomous agent that audits and repairs a fresh dataset
 - [ ] Phase 3a — Streamlit demo + write-up
 - [ ] Phase 3b — Deploy as AWS Lambda + S3 pipeline
 

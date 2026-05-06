@@ -11,11 +11,35 @@ Later (Phase 3a): Anthropic for the polished demo.
 
 from __future__ import annotations
 
+import json
+from dataclasses import dataclass, field
 from typing import Any, Iterable
 
 from groq import Groq
 
 from .config import settings
+
+
+@dataclass
+class ToolCall:
+    """One tool invocation requested by the model."""
+
+    id: str
+    name: str
+    arguments: dict
+
+
+@dataclass
+class ChatResponse:
+    """Richer return shape for tool-calling chats.
+
+    `text` is set when the model talks; `tool_calls` is set when it wants
+    the orchestrator to execute one or more tools. Either or both can be
+    populated in a single turn.
+    """
+
+    text: str | None = None
+    tool_calls: list[ToolCall] = field(default_factory=list)
 
 
 class LLMClient:
@@ -69,3 +93,50 @@ class LLMClient:
             return response.choices[0].message.content or ""
 
         raise RuntimeError(f"Unreachable: provider={self.provider}")
+
+    def chat_with_tools(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        *,
+        temperature: float = 0.0,
+        max_tokens: int | None = None,
+        **kwargs: Any,
+    ) -> ChatResponse:
+        """Send a chat request with tool definitions; return text + tool_calls.
+
+        Tools are described as OpenAI-compatible JSON-schema entries. The
+        model decides whether to reply, call tools, or both.
+        """
+        if self.provider != "groq":
+            raise NotImplementedError(
+                f"chat_with_tools not yet implemented for {self.provider!r}"
+            )
+
+        response = self._client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            tools=tools,
+            tool_choice="auto",
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
+        )
+        msg = response.choices[0].message
+
+        tool_calls: list[ToolCall] = []
+        if msg.tool_calls:
+            for tc in msg.tool_calls:
+                try:
+                    args = json.loads(tc.function.arguments)
+                except json.JSONDecodeError:
+                    args = {}
+                tool_calls.append(
+                    ToolCall(
+                        id=tc.id,
+                        name=tc.function.name,
+                        arguments=args,
+                    )
+                )
+
+        return ChatResponse(text=msg.content, tool_calls=tool_calls)
