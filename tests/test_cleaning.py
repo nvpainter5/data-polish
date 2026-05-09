@@ -11,7 +11,9 @@ from pydantic import ValidationError
 
 from datapolish.cleaning import (
     CleaningPlan,
+    CleaningRule,
     build_user_prompt,
+    derive_short_label,
 )
 from datapolish.profile import ColumnProfile, DatasetProfile
 
@@ -158,3 +160,75 @@ def test_empty_rule_list_is_valid() -> None:
     raw = {"summary": "No issues found.", "rules": []}
     plan = CleaningPlan.model_validate(raw)
     assert plan.rules == []
+
+
+def test_custom_instructions_appear_in_user_prompt() -> None:
+    profile = _tiny_profile()
+    prompt = build_user_prompt(profile, custom_instructions="be conservative on dates")
+    assert "user_steering" in prompt
+    assert "be conservative on dates" in prompt
+
+
+def test_custom_instructions_are_capped_and_stripped() -> None:
+    profile = _tiny_profile()
+    long_text = "  abc " * 200  # > 500 chars after expansion
+    prompt = build_user_prompt(profile, custom_instructions=long_text)
+    # The user_steering block exists but is bounded.
+    assert "user_steering" in prompt
+    # Should not be longer than the cap plus a small overhead.
+    block = prompt.split("<user_steering>", 1)[1].split("</user_steering>", 1)[0]
+    assert len(block.strip()) <= 510
+
+
+def test_no_user_steering_block_when_instructions_empty() -> None:
+    profile = _tiny_profile()
+    prompt = build_user_prompt(profile, custom_instructions=None)
+    assert "user_steering" not in prompt
+    prompt2 = build_user_prompt(profile, custom_instructions="   ")
+    assert "user_steering" not in prompt2
+
+
+def _rule(operation: str, column: str = "x", **params) -> CleaningRule:
+    return CleaningRule(
+        column=column,
+        operation=operation,
+        parameters=params or {},
+        confidence="high",
+        reasoning="t",
+    )
+
+
+def test_derive_short_label_set_case() -> None:
+    label = derive_short_label(_rule("set_case", "complaint_type", case="title"))
+    assert label.startswith("Title-case")
+    assert "complaint_type" in label
+
+
+def test_derive_short_label_other_ops() -> None:
+    assert derive_short_label(_rule("trim_whitespace", "name")).startswith("Trim")
+    assert derive_short_label(
+        _rule("collapse_internal_whitespace", "addr")
+    ).startswith("Collapse")
+    assert derive_short_label(_rule("mark_for_review", "agency_name")).startswith(
+        "Review"
+    )
+
+
+def test_derive_short_label_capped_to_40() -> None:
+    label = derive_short_label(_rule("set_case", "x" * 100, case="title"))
+    assert len(label) <= 40
+
+
+def test_short_label_back_filled_when_missing() -> None:
+    """If the LLM omits short_label, it gets filled in deterministically.
+    Verified at the schema level — short_label has a default of \"\"."""
+    rule = CleaningRule(
+        column="complaint_type",
+        operation="set_case",
+        parameters={"case": "title"},
+        confidence="high",
+        reasoning="t",
+    )
+    assert rule.short_label == ""  # default before back-fill
+    rule.short_label = derive_short_label(rule)
+    assert rule.short_label  # non-empty after back-fill

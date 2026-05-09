@@ -82,6 +82,19 @@ class DatetimeStats(BaseModel):
     future_dated_count: int
 
 
+class OutlierFlags(BaseModel):
+    """Outlier signals on a single column.
+
+    Two flavors of numeric outliers (IQR fences and z-score), plus
+    rare-value detection for low-to-mid cardinality categorical columns.
+    """
+
+    numeric_iqr_outliers: int = 0
+    numeric_zscore_outliers: int = 0
+    rare_categorical_count: int = 0
+    rare_categorical_examples: list[str] = Field(default_factory=list)
+
+
 class ColumnProfile(BaseModel):
     name: str
     dtype: str
@@ -94,6 +107,7 @@ class ColumnProfile(BaseModel):
     string_stats: StringStats | None = None
     datetime_stats: DatetimeStats | None = None
     top_values: list[TopValue] | None = None
+    outliers: OutlierFlags | None = None
 
 
 class DatasetProfile(BaseModel):
@@ -186,6 +200,54 @@ def _profile_datetime(s: pd.Series) -> DatetimeStats | None:
 # --------------------------------------------------------------------------- #
 
 
+def _profile_numeric_outliers(s: pd.Series) -> OutlierFlags:
+    """IQR-based and z-score based outlier counts for a numeric series."""
+    s_clean = s.dropna()
+    if len(s_clean) < 4:
+        return OutlierFlags()
+
+    q1 = s_clean.quantile(0.25)
+    q3 = s_clean.quantile(0.75)
+    iqr = q3 - q1
+    if iqr > 0:
+        lower = q1 - 1.5 * iqr
+        upper = q3 + 1.5 * iqr
+        iqr_count = int(((s_clean < lower) | (s_clean > upper)).sum())
+    else:
+        iqr_count = 0
+
+    mean = s_clean.mean()
+    std = s_clean.std()
+    if std and std > 0:
+        z = (s_clean - mean) / std
+        z_count = int((z.abs() > 3).sum())
+    else:
+        z_count = 0
+
+    return OutlierFlags(
+        numeric_iqr_outliers=iqr_count,
+        numeric_zscore_outliers=z_count,
+    )
+
+
+def _profile_categorical_outliers(
+    s: pd.Series, *, threshold: float = 0.001
+) -> OutlierFlags:
+    """Find values whose frequency falls below `threshold` of non-null rows."""
+    s_clean = s.dropna()
+    if len(s_clean) == 0:
+        return OutlierFlags()
+
+    counts = s_clean.value_counts()
+    total = len(s_clean)
+    rare_mask = (counts / total) < threshold
+    rare = counts[rare_mask]
+    return OutlierFlags(
+        rare_categorical_count=int(len(rare)),
+        rare_categorical_examples=[str(v) for v in rare.head(5).index.tolist()],
+    )
+
+
 def _looks_like_datetime(name: str, s: pd.Series) -> bool:
     """Decide whether to treat a column as a datetime.
 
@@ -233,6 +295,18 @@ def profile_column(name: str, s: pd.Series) -> ColumnProfile:
         profile.top_values = [
             TopValue(value=str(v), count=int(c)) for v, c in counts.items()
         ]
+
+    # Outlier flags. Numeric columns get IQR + z-score; non-numeric, non-date
+    # columns of low/mid cardinality get rare-value detection. High-cardinality
+    # free-text columns (think incident_address) skip both — every value is
+    # "rare" by construction.
+    if pd.api.types.is_numeric_dtype(s):
+        profile.outliers = _profile_numeric_outliers(s)
+    elif (
+        not _looks_like_datetime(name, s)
+        and 1 < unique_count <= 1000
+    ):
+        profile.outliers = _profile_categorical_outliers(s)
 
     return profile
 

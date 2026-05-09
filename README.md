@@ -2,7 +2,11 @@
 
 > An AI-augmented data engineering pipeline that ingests messy real-world tabular data, profiles it deterministically, lets an LLM propose cleaning rules in a strict typed schema, applies them through deterministic safety gates, and ships a validated clean dataset plus a full audit trail.
 
-Status: **Phase 1 + Phase 2 complete.** Phase 3a (Streamlit demo) shipped. Phase 3b (AWS Lambda + S3 deployment) up next.
+Status: **v2 multi-user web app deployed.** v1 portfolio (single-file pipeline + AWS Lambda) is still here as a reference at `app.py` + `lambda/`.
+
+## Try it live
+
+A free-tier deployment of the v2 app lives on Streamlit Community Cloud (frontend) + Render (backend). Register and run a pipeline against your own data: see `docs/v2_deployment.md` for details.
 
 ## Architecture
 

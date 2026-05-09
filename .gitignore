@@ -2,6 +2,7 @@
 .env
 *.key
 *.pem
+auth_config.yaml
 
 # Python
 __pycache__/
@@ -20,6 +21,7 @@ env/
 data/raw/
 data/cleaned/
 data/interim/
+data/jobs/
 *.parquet
 *.csv
 !data/samples/*.csv
@@ -37,6 +39,9 @@ reports/*.json
 
 # Streamlit
 .streamlit/secrets.toml
+# allow .streamlit/config.toml and .streamlit/secrets.example.toml
+!.streamlit/config.toml
+!.streamlit/secrets.example.toml
 
 # AWS SAM build artifacts
 .aws-sam/

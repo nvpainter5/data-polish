@@ -1,0 +1,34 @@
+# Render Blueprint for the DataPolish FastAPI backend.
+#
+# Quickstart:
+#   1. Push this file to your public GitHub repo.
+#   2. In Render, create a new Web Service from your repo.
+#      Render reads this file automatically when "render.yaml" is present.
+#   3. After the first deploy, set GROQ_API_KEY in the dashboard.
+#   4. Once your Streamlit Community Cloud URL is known, set
+#      ALLOWED_ORIGINS so the API trusts it for CORS.
+#
+# Free tier notes:
+#   - Service sleeps after 15 min idle. First hit afterward takes ~30 s.
+#   - Disk is ephemeral — uploaded jobs don't survive restarts. v3 work
+#     would replace LocalStorage with S3Storage to fix this.
+
+services:
+  - type: web
+    name: datapolish-api
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    envVars:
+      - key: GROQ_API_KEY
+        # Set in the Render dashboard after first deploy. Marking sync=false
+        # tells Render not to track this value in the blueprint.
+        sync: false
+      - key: ALLOWED_ORIGINS
+        # Update with your deployed Streamlit URL once you have it.
+        value: "https://datapolish.streamlit.app,http://localhost:8501"
+      - key: PYTHON_VERSION
+        value: "3.11"
