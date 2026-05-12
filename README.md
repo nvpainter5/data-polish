@@ -1,93 +1,126 @@
 # Data Polish
 
-> An AI-augmented data engineering pipeline that ingests messy real-world tabular data, profiles it deterministically, lets an LLM propose cleaning rules in a strict typed schema, applies them through deterministic safety gates, and ships a validated clean dataset plus a full audit trail.
+> A multi-user web app that cleans messy real-world datasets. Upload a CSV
+> (or pull from S3 / GCS / Azure), an LLM proposes cleaning rules grounded in
+> a deterministic per-column profile, two layers of safety gates re-validate
+> every rule before applying, and you get back a cleaned parquet plus a full
+> audit log of every change.
 
-Status: **v2 multi-user web app deployed.** v1 portfolio (single-file pipeline + AWS Lambda) is still here as a reference at `app.py` + `lambda/`.
+**Live demo:** <https://data-polish.streamlit.app>  ·  **API:** <https://datapolish-api.onrender.com/healthz>
 
-## Try it live
+Built end-to-end as a portfolio project: frontend, backend, database,
+deployment, custom domain, transactional email — all of it shipped to
+production on a free-tier stack.
 
-A free-tier deployment of the v2 app lives on Streamlit Community Cloud (frontend) + Render (backend). Register and run a pipeline against your own data: see `docs/v2_deployment.md` for details.
+---
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    raw[(Raw CSV<br/>50k rows, 44 cols)] --> profile[Deterministic profiler]
-    profile -- slim payload --> phase1{{Phase 1: Static plan<br/>one LLM call}}
-    profile -- tool calls --> phase2{{Phase 2: Agent loop<br/>LLM + tools}}
-    phase1 --> gate[Safety-gated apply]
-    phase2 --> gate
-    gate --> cleaned[(Cleaned parquet)]
-    gate --> audit[Audit JSON]
-```
+![System architecture](docs/images/architecture.png)
 
-Both Phase 1 and Phase 2 feed the same deterministic apply layer — the LLM proposes, deterministic code disposes, regardless of which mode produced the proposal.
+Six services, one workflow. Bearer JWT on every protected request; healthcheck
+probes the DB so Render can react when Supabase pauses on the free tier.
 
-## Why it's built this way
+| Service             | Role                                              |
+| ------------------- | ------------------------------------------------- |
+| Streamlit Cloud     | Frontend at `data-polish.streamlit.app`           |
+| Render (FastAPI)    | Backend, ~30 routes, JWT auth                     |
+| Supabase Postgres   | Users, jobs, audit events, magic-link tokens      |
+| Groq                | Llama 3.3 70B for LLM inference                   |
+| Resend              | Magic-link email from `contact.data-polish.com`   |
+| Cloud object stores | S3, GCS, Azure — user-supplied creds, never stored |
 
-Three design pillars set this apart from a typical "stuff data into ChatGPT" demo:
+---
 
-1. **Profile-first prompting.** The LLM never sees raw rows. It sees a small, structured profile (column dtypes, null %, casing patterns, top values, etc.) — about 5 KB of signal in place of 50 MB of noise. Faster, cheaper, sharper results.
-2. **Structured outputs as a contract.** The LLM's reply is parsed into a typed `CleaningPlan` (pydantic). If the model hallucinates an operation we don't recognize, validation fails loud — we never apply rules we don't understand.
-3. **The LLM proposes; deterministic code disposes.** Every proposed rule passes through a confidence gate (only `high` confidence rules auto-apply) AND a per-operation safety gate (which re-checks the actual column profile to confirm the rule's preconditions hold). Catches LLM false positives even when the prompt failed to.
+## The core idea
 
-## What the pipeline does
+![Safety pattern](docs/images/safety_pattern.png)
 
-```
-data/raw/nyc_311_sample.csv
-        |
-        v   scripts/profile_dataset.py
-DatasetProfile  --->  reports/profile_<timestamp>.json   (canonical archive)
-        |
-        v   scripts/propose_cleaning.py  (slim view -> Groq Llama 3.3 70B)
-CleaningPlan   --->  reports/cleaning_plan_<timestamp>.json
-        |
-        v   scripts/apply_cleaning.py  (confidence gate + safety gate per rule)
-cleaned DataFrame, audit log
-        |
-        v
-data/cleaned/nyc_311_cleaned.parquet
-reports/cleaning_audit_<timestamp>.json
-```
+> **LLM proposes, deterministic code disposes.**
 
-## Setup
+Every LLM output crosses one explicit boundary into a deterministic safety zone
+before it can mutate real data. Three pillars set this apart from "stuff data
+into ChatGPT" demos:
+
+1. **Profile-first prompting.** The LLM never sees raw rows. It sees a small,
+   structured profile (column dtypes, null %, casing patterns, top values) —
+   about 5 KB of signal in place of 50 MB of noise. Faster, cheaper, sharper.
+2. **Structured outputs as a contract.** The LLM's reply is parsed into a
+   typed `CleaningPlan` (Pydantic). If the model hallucinates an operation we
+   don't recognize, validation fails loud — we never apply rules we don't
+   understand.
+3. **Two-stage safety gates.** Every proposed rule passes through a confidence
+   filter (only `high`-confidence rules auto-apply) *and* a per-rule
+   precondition check (re-reads the column profile, confirms the rule still
+   makes sense). Catches LLM false positives the prompt failed to prevent.
+
+The first time the gates caught an LLM mistake felt like vindication: the
+model proposed a high-confidence cleaning rule on `intersection_street_1`,
+except in the actual data that column was 99% null. The per-rule gate re-read
+the profile, saw the precondition failed, rejected the rule, and recorded the
+rejection in the audit log. No corrupted data, full provenance.
+
+---
+
+## Build path
+
+![Roadmap](docs/images/roadmap.png)
+
+| Stage         | What shipped                                                      |
+| ------------- | ----------------------------------------------------------------- |
+| **Phase 1**   | Local pipeline: profile → LLM proposes → safety gates → apply     |
+| **Phase 2**   | Tool-using agent on top of the same engine                        |
+| **Phase 3**   | Streamlit dashboard + containerized AWS Lambda (S3-triggered)     |
+| **v2.0–v2.6** | Multi-user web app: FastAPI, per-user state, S3 connector, quality score, deployed live |
+| **v3.0–v3.4** | Postgres on Supabase, JWT auth, magic-link email, audit log, large-dataset streaming |
+| **v3.5–v3.7** | GCS + Azure connectors, structured logging, DB-aware healthcheck, Sentry-ready, ops runbook |
+
+Full version-by-version notes in [`PROJECT_NOTES.md`](PROJECT_NOTES.md).
+
+---
+
+## Try it locally
 
 Requires Python 3.11+ and a free [Groq API key](https://console.groq.com).
 
 ```bash
-# Create venv and install
+# 1. Clone and install
+git clone https://github.com/nvpainter5/data-polish.git
+cd data-polish
 python3 -m venv .venv
 source .venv/bin/activate
-pip install --upgrade pip
 pip install -r requirements.txt
 
-# Configure
+# 2. Configure
 cp .env.example .env
-# Edit .env and paste your real GROQ_API_KEY
+# Edit .env — at minimum set GROQ_API_KEY. Leave DATABASE_URL blank
+# to fall back to local SQLite at data/datapolish.db.
+
+# 3. Run the API
+uvicorn api.main:app --reload --port 8000
+
+# 4. Run the UI (in another terminal)
+streamlit run ui/Home.py
 ```
 
-## Demo dashboard
+The UI opens at `http://localhost:8501` and talks to the API on `:8000`.
+First-time users register, then can either set a password or sign in with a
+magic-link code (printed to the API console when `DEV_MODE=true`).
 
-A Streamlit dashboard ships with the project for visualizing past runs. Useful for screenshots, demos, and debugging:
+---
 
-```bash
-streamlit run app.py
-```
+## End-to-end pipeline run (no web app)
 
-Opens at `http://localhost:8501`. Five tabs: **Overview** (key metrics, LLM summary, agent run summary), **Profile** (per-column stats), **Cleaning plan (LLM)** (every proposed rule with confidence), **Audit (code)** (applied / skipped / failed with reasons), **Before / After** (side-by-side data samples for any column the pipeline modified).
-
-## End-to-end run
-
-Four commands, in order:
+Useful for understanding the core engine in isolation. Four commands, in order:
 
 ```bash
 # 1. Confirm the LLM connection works
 python scripts/smoke_test_groq.py
 
-# 2. Download a reproducible NYC 311 sample (~50k rows from a pinned date range)
+# 2. Download a reproducible NYC 311 sample (~50k rows)
 python scripts/download_311_sample.py
 
-# 3. Profile the raw dataset (no AI; pure-Python deterministic scan)
+# 3. Profile the dataset (deterministic, no AI)
 python scripts/profile_dataset.py
 
 # 4. Ask the LLM to propose cleaning rules from the profile
@@ -97,122 +130,153 @@ python scripts/propose_cleaning.py
 python scripts/apply_cleaning.py
 ```
 
-Each step writes its output into `reports/` (JSON artifacts) or `data/cleaned/` (parquet) and prints a human-readable summary to the terminal.
+Each step writes JSON into `reports/` or parquet into `data/cleaned/` and
+prints a human-readable summary.
+
+### Sample audit output (truncated)
+
+```
+AUDIT: 10 applied / 8 skipped / 0 failed
+
+APPLIED:
+  [set_case]                   complaint_type           -> 10,884 rows changed
+  [set_case]                   descriptor               -> 14,657 rows changed
+  [collapse_internal_whitespace] incident_address        -> 3,113 rows changed
+  [collapse_internal_whitespace] resolution_description  -> 10,198 rows changed
+  ...
+
+SKIPPED:
+  [collapse_internal_whitespace] intersection_street_1   (high)
+      reason: no double-spaces detected in profile      ← gate save
+  [set_case]                   borough                   (medium)
+      reason: confidence=medium; only `high` rules auto-apply
+  ...
+
+Wrote cleaned dataset: data/cleaned/nyc_311_cleaned.parquet  (5.0 MB)
+Wrote audit:           reports/cleaning_audit_<timestamp>.json
+```
+
+---
 
 ## Project layout
 
 ```
-DataPolish/
-├── src/datapolish/
-│   ├── config.py             # env loading, fail-loud on missing keys
-│   ├── llm_client.py         # provider-agnostic LLM wrapper (Groq today)
-│   ├── profile.py            # deterministic profiler + slim view for LLM prompts
-│   ├── cleaning.py           # LLM-driven cleaning rule proposer
-│   └── apply.py              # apply step with confidence + per-op safety gates
-├── scripts/                  # runnable CLIs that wire library modules together
-├── tests/                    # 26 unit tests covering profile, prompts, gates, apply
-├── data/
-│   ├── raw/                  # downloaded source (gitignored)
-│   └── cleaned/              # pipeline output parquet (gitignored)
-├── reports/                  # JSON artifacts: profiles, plans, audits
-└── docs/
-    └── prompt_iterations.md  # working log of system-prompt changes and effects
+data-polish/
+├── api/                        # FastAPI backend (v2/v3)
+│   ├── main.py                 # ~30 routes: auth, jobs, pipeline, audit
+│   ├── auth.py                 # bcrypt + JWT (python-jose)
+│   ├── magic_link.py           # email OTP via Resend
+│   ├── audit.py                # security event logging
+│   ├── cloud_storage.py        # S3 / GCS / Azure download helpers
+│   ├── db.py                   # SQLAlchemy engine (Postgres / SQLite)
+│   ├── models.py               # User, Job, AuditEvent, MagicLinkToken
+│   ├── jobs.py                 # job state CRUD
+│   ├── pipeline_runner.py      # streaming + chunked read for large files
+│   ├── storage.py              # local filesystem artifact storage
+│   ├── user_store.py           # register / authenticate
+│   └── __init__.py             # logging + Sentry init
+├── ui/                         # Streamlit frontend
+│   ├── Home.py                 # landing + auth
+│   ├── api_client.py           # httpx wrapper around the API
+│   ├── auth_helpers.py         # session-state helpers
+│   └── pages/                  # Upload, Run, Results, Activity
+├── src/datapolish/             # Pure pipeline library (used by api/ and lambda/)
+│   ├── llm_client.py           # provider-agnostic LLM wrapper (Groq today)
+│   ├── profile.py              # deterministic profiler
+│   ├── cleaning.py             # LLM-driven rule proposer
+│   ├── apply.py                # apply with confidence + safety gates
+│   └── agent.py                # tool-using agent (Phase 2)
+├── scripts/                    # runnable CLIs that wire library modules
+├── tests/                      # 36+ unit tests, < 1s total
+├── lambda/                     # AWS Lambda + Dockerfile (Phase 3b)
+├── docs/                       # operations runbook, resend setup, blueprints
+├── render.yaml                 # Render Blueprint for backend deploy
+├── template.yaml               # AWS SAM template for Lambda
+└── app.py                      # legacy Streamlit dashboard (Phase 3a reference)
 ```
 
-## Sample run output (truncated)
-
-```
-Loading raw data: data/raw/nyc_311_sample.csv
-  50,000 rows x 44 columns
-Loading profile: reports/profile_20260503_183817.json
-Loading plan:    reports/cleaning_plan_20260504_174432.json
-  18 proposed rules
-
-Applying plan with safety gates...
-
-======================================================================
-AUDIT: 10 applied / 8 skipped / 0 failed
-======================================================================
-
-APPLIED:
-  [set_case] complaint_type             -> 10,884 rows changed
-  [set_case] descriptor                 -> 14,657 rows changed
-  [set_case] descriptor_2               -> 13,210 rows changed
-  [set_case] location_type              -> 10,044 rows changed
-  [collapse_internal_whitespace] incident_address     -> 3,113 rows changed
-  [collapse_internal_whitespace] resolution_description -> 10,198 rows changed
-  ...
-
-SKIPPED:
-  [collapse_internal_whitespace] intersection_street_1  (high)
-      reason: no double-spaces detected in profile
-  [set_case] borough  (medium)
-      reason: confidence=medium; only `high` rules auto-apply
-  ...
-
-Validating cleaned dataframe...
-  All sanity checks passed.
-
-Wrote cleaned dataset: data/cleaned/nyc_311_cleaned.parquet  (5.0 MB)
-Wrote audit:           reports/cleaning_audit_20260505_162032.json
-```
-
-The `intersection_street_1` skip is the safety gate earning its keep — the LLM proposed the rule at high confidence, but a deterministic re-check of the column profile found no double-spaces and refused to run.
-
-## Phase 3b: AWS deployment
-
-The pipeline can run as an AWS Lambda triggered by S3 uploads. CSV lands in `s3://datapolish-raw/`, cleaned parquet + audit JSON write to `s3://datapolish-cleaned/`. Free-tier deployment.
-
-```
-You upload a CSV  ->  s3://datapolish-raw/  ->  Lambda (container)  ->  s3://datapolish-cleaned/cleaned/*.parquet
-                                                                                                  /cleaned/*.json
-```
-
-Code: `lambda/lambda_function.py`, `lambda/Dockerfile`, `template.yaml` (AWS SAM).
-Full step-by-step guide: [`docs/aws_deployment.md`](docs/aws_deployment.md).
-
-## Phase 2: the autonomous agent
-
-Phase 2 turns the static Phase 1 pipeline into a tool-using agent. The LLM is given typed tools (`get_dataset_overview`, `get_column_profile`, `apply_rule`, `compare_before_after`, `finish`) and runs an iterative loop where it decides what to do next based on what it observes.
-
-Same safety gates as Phase 1 — when the agent calls `apply_rule`, the gates re-validate the rule's preconditions exactly as before. Phase 1's defensive infrastructure becomes Phase 2's tooling without modification.
-
-Run with:
-
-```bash
-python scripts/run_agent.py
-```
-
-Architectural takeaway: a thin tool overview (just dtypes and null counts) led the agent to under-explore — it stopped after 3 fixes. Enriching `get_dataset_overview` with pre-computed `issue_summary` hints (which columns have mixed casing, double spaces, denormalization candidates) drove the agent to thorough coverage on the next run. **Hint-rich tools beat agentic discovery.**
+---
 
 ## Tests
-
-36 unit tests, all running in under a second. No network or LLM calls in the test suite.
 
 ```bash
 pytest -v
 ```
 
+36+ unit tests, all run in under a second. No network or LLM calls in the
+suite (the API tests use a temp SQLite DB and mocked Groq).
+
 Coverage:
-- profiler (numeric / string / datetime stats, casing/whitespace detection, cardinality cutoffs)
-- cleaning schema validation (rejects unknown operations, missing fields, bad confidence values)
-- slim payload construction (filters high-null columns, compact JSON)
-- apply step (confidence gate, per-operation safety gates, applied row counts)
-- post-apply validation (row count preservation, required columns, unique key uniqueness)
-- agent tools (overview with issue hints, column profile, apply via gates, mark_for_review, finish)
+- Deterministic profiler (numeric, string, datetime stats)
+- Cleaning schema validation (rejects unknown operations, bad confidence)
+- Slim payload construction (token-efficient prompts)
+- Apply step (confidence + per-operation safety gates)
+- Post-apply validation (row count, key uniqueness)
+- Agent tools (overview hints, profile, apply via gates)
+- API contract (auth flows, JWT, per-user job isolation, cloud sources)
 
-## Provider abstraction
+---
 
-All LLM calls go through `LLMClient` in `src/datapolish/llm_client.py`. Today it wraps Groq. The class accepts `provider` and `model` arguments so swapping to Anthropic or OpenAI for the polished demo run, or to a local Ollama for offline operation, is a one-file change.
+## Stack
+
+| Layer            | Choice                                      |
+| ---------------- | ------------------------------------------- |
+| LLM              | Groq + Llama 3.3 70B (provider-abstracted)  |
+| Backend          | FastAPI + Uvicorn                           |
+| Frontend         | Streamlit (multi-page)                      |
+| Database         | Postgres via Supabase (SQLite for local dev) |
+| ORM              | SQLAlchemy 2.0                              |
+| Auth             | bcrypt + python-jose JWT, magic-link OTP    |
+| Email            | Resend                                      |
+| Data engine      | pandas + pyarrow                            |
+| Validation       | Pydantic v2                                 |
+| Deployment       | Render (API) + Streamlit Cloud (UI)         |
+| Object stores    | boto3, google-cloud-storage, azure-storage-blob |
+| Observability    | Python `logging` + Sentry (opt-in)          |
+
+---
+
+## Operations
+
+See [`docs/operations.md`](docs/operations.md) for the on-call runbook
+(healthcheck reading, common incidents, deploy reference, secret-rotation
+table).
+
+`/healthz` returns JSON like:
+
+```json
+{
+  "ok": true,
+  "service": "datapolish-api",
+  "version": "3.7.0",
+  "env": "production",
+  "checks": {
+    "database": "ok",
+    "sentry": "enabled",
+    "email_provider": "resend"
+  }
+}
+```
+
+503 if the DB is unreachable, so orchestrators do the right thing.
+
+---
 
 ## Roadmap
 
-- [x] Phase 0 — Scaffolding
-- [x] Phase 1 — Deterministic profiler + LLM-as-tool cleaning + safety-gated apply + validation
-- [x] Phase 2 — Tool-using autonomous agent that audits and repairs a fresh dataset
-- [x] Phase 3a — Streamlit demo + write-up
-- [x] Phase 3b — AWS Lambda + S3 deployment (code shipped; deployment guide at `docs/aws_deployment.md`)
+- [x] **Phase 1** — Deterministic profiler + LLM-as-tool cleaning + safety-gated apply
+- [x] **Phase 2** — Tool-using autonomous agent
+- [x] **Phase 3a** — Streamlit demo + write-up
+- [x] **Phase 3b** — AWS Lambda + S3 deployment
+- [x] **v2.0–v2.6** — FastAPI multi-user web app deployed on Render + Streamlit Cloud
+- [x] **v3.0–v3.4** — Postgres, JWT, magic-link email auth, audit log, large-dataset support
+- [x] **v3.5–v3.7** — GCS + Azure connectors, structured logging, DB-aware healthcheck, ops runbook
+- [ ] Ollama as an offline LLM provider (deferred)
+
+---
 
 ## Source data
 
-NYC 311 Service Requests, via [NYC Open Data](https://data.cityofnewyork.us/Social-Services/311-Service-Requests-from-2010-to-Present/erm2-nwe9). The sample is pulled fresh by `scripts/download_311_sample.py` against the public Socrata API; date range and row count are pinned in the script for reproducibility.
+NYC 311 Service Requests via [NYC Open Data](https://data.cityofnewyork.us/Social-Services/311-Service-Requests-from-2010-to-Present/erm2-nwe9).
+The sample is pulled fresh by `scripts/download_311_sample.py` against the
+public Socrata API; date range and row count pinned for reproducibility.
