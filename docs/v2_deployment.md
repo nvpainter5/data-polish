@@ -36,16 +36,16 @@ Limitations of the free tier:
 
 1. Sign in to [render.com](https://render.com) (GitHub login is fine).
 2. Click **New +** → **Blueprint**.
-3. Connect your GitHub account if not already; pick the `DataPolish` repo.
-4. Render auto-detects `render.yaml` and proposes one service: `datapolish-api`. Click **Apply**.
+3. Connect your GitHub account if not already; pick the `data-polish` repo.
+4. Render auto-detects `render.yaml` and proposes one service: `data-polish-api`. Click **Apply**.
 5. The first build takes ~3 minutes (pip install of pandas/pyarrow/etc). Watch the live logs.
 6. When it finishes, find the service in your dashboard. Click **Environment** in the sidebar.
 7. **Set `GROQ_API_KEY`** to your `gsk_...` value. Click Save. Render redeploys automatically (~30 seconds).
-8. Note your service URL. It looks like `https://datapolish-api-XXXX.onrender.com`. Test it:
+8. Note your service URL. It looks like `https://data-polish-api-XXXX.onrender.com`. Test it:
 
     ```bash
-    curl https://datapolish-api-XXXX.onrender.com/healthz
-    # {"ok":true,"service":"datapolish-api","version":"2.0.0-dev"}
+    curl https://data-polish-api-XXXX.onrender.com/healthz
+    # {"ok":true,"service":"datapolish-api","version":"3.7.0",...}
     ```
 
 ## 2. Frontend on Streamlit Community Cloud
@@ -53,7 +53,7 @@ Limitations of the free tier:
 1. Go to [share.streamlit.io](https://share.streamlit.io). Sign in with GitHub.
 2. Click **New app**.
 3. Settings:
-   - **Repository**: your DataPolish repo
+   - **Repository**: your data-polish repo
    - **Branch**: `main`
    - **Main file path**: `ui/Home.py`
    - **App URL**: choose something memorable, e.g. `datapolish` → live at `datapolish.streamlit.app`

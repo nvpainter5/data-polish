@@ -67,7 +67,7 @@ st.markdown(
     "re-validate each rule → cleaned parquet out, with a full audit log."
 )
 st.markdown(
-    "[GitHub](https://github.com/nvpainter5/DataPolish) "
+    "[GitHub](https://github.com/nvpainter5/data-polish) "
     "· Built on NYC 311 Service Requests "
     "· Llama 3.3 70B via Groq · Phase 1 + Phase 2 complete"
 )
