@@ -1,4 +1,4 @@
-"""DataPolish v2 — multi-page Streamlit UI.
+"""Data Polish v2 — multi-page Streamlit UI.
 
 Entry point: `ui/Home.py`. Run with:
     streamlit run ui/Home.py

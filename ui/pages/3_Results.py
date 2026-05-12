@@ -22,7 +22,7 @@ from api_client import (  # noqa: E402
 )
 from auth_helpers import require_auth  # noqa: E402
 
-st.set_page_config(page_title="Results — DataPolish", layout="wide")
+st.set_page_config(page_title="Results — Data Polish", layout="wide")
 
 require_auth()
 
@@ -91,13 +91,9 @@ if quality:
     )
 
     st.caption(
-        "Score reflects deterministic checks the pipeline knows about — "
-        "casing, whitespace, outliers, rare categories, high nulls, "
-        "constant columns, and suspected key duplicates. A score of 100 "
-        "means none of those fired; it does NOT mean the dataset is "
-        "semantically perfect (e.g., business-rule violations, referential "
-        "integrity, or schema correctness aren't checked). The Suggestions "
-        "section uses an LLM to propose follow-ups beyond the metric."
+        "Score covers format-level checks. 100 doesn't mean semantically "
+        "perfect — business rules and referential integrity aren't checked. "
+        "See Suggestions below for follow-ups."
     )
 
 # --------------------------------------------------------------------------- #

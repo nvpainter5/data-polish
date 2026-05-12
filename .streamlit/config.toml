@@ -8,8 +8,11 @@ textColor = "#262730"
 font = "sans serif"
 
 [server]
-headless = true
-maxUploadSize = 100  # MB
+# headless is intentionally NOT set so local `streamlit run` auto-opens
+# the browser. Streamlit Cloud sets it to true automatically; we don't
+# need it in the file.
+# Stay in sync with MAX_UPLOAD_MB in ui/pages/1_Upload.py.
+maxUploadSize = 250  # MB
 
 [browser]
 gatherUsageStats = false

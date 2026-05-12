@@ -1,4 +1,4 @@
-# DataPolish Lambda container image.
+# Data Polish Lambda container image.
 #
 # Built with `sam build` from the project root using the SAM template's
 # Image specification. Build context is the project root so we can COPY

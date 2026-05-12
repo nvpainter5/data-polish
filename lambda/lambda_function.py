@@ -1,4 +1,4 @@
-"""AWS Lambda handler for DataPolish.
+"""AWS Lambda handler for Data Polish.
 
 Triggered by s3:ObjectCreated:* on the raw bucket. For each new CSV:
   1. Download the CSV from s3://<RAW_BUCKET>/<key>

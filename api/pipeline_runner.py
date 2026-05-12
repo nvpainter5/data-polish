@@ -67,6 +67,44 @@ def detect_delimiter(raw_bytes: bytes) -> str:
     return best if counts[best] >= 1 else ","
 
 
+# Read CSVs in chunks once they get over this size. Avoids single-shot
+# pd.read_csv blowing through the server's memory budget. Final
+# DataFrame is still in-memory (full streaming is v4) but chunked reads
+# fail more gracefully and give us better error messages mid-read.
+CHUNKED_READ_THRESHOLD_BYTES = 50 * 1024 * 1024  # 50 MB
+CHUNK_SIZE_ROWS = 100_000
+
+
+class DatasetTooLargeError(RuntimeError):
+    """Raised when a dataset is too large to load into available memory."""
+
+
+def _read_csv_in_chunks(
+    raw_bytes: bytes, delimiter: str
+) -> pd.DataFrame:
+    """Read a CSV in 100k-row chunks. Catches MemoryError mid-read and
+    surfaces a clean message instead of a Python crash."""
+    chunks: list[pd.DataFrame] = []
+    try:
+        reader = pd.read_csv(
+            BytesIO(raw_bytes),
+            sep=delimiter,
+            chunksize=CHUNK_SIZE_ROWS,
+            low_memory=False,
+        )
+        for chunk in reader:
+            chunks.append(chunk)
+    except MemoryError as exc:  # noqa: BLE001
+        raise DatasetTooLargeError(
+            "Dataset is too large to load into memory on this server. "
+            "Try sampling first, or wait for the v4 streaming engine."
+        ) from exc
+
+    if not chunks:
+        return pd.DataFrame()
+    return pd.concat(chunks, ignore_index=True)
+
+
 def _smart_read_dataframe(
     raw_bytes: bytes, source_hint: str = ""
 ) -> pd.DataFrame:
@@ -76,10 +114,10 @@ def _smart_read_dataframe(
       1. If the source hints at JSON (`.json` extension or content
          starts with `[` / `{`), use pandas.read_json.
       2. If the source hints at parquet, use pandas.read_parquet.
-      3. Otherwise detect the delimiter manually (count occurrences in
-         the header line) and read as CSV with that separator.
+      3. Otherwise detect the delimiter and read as CSV — chunked for
+         large files, single-shot for small ones.
 
-    Raises ValueError with a clear message if nothing parses cleanly.
+    Raises DatasetTooLargeError when memory budget is exceeded.
     """
     head = raw_bytes.lstrip()[:1]
     is_json_extension = bool(re.search(r"\.json($|\?|#)", source_hint, re.I))
@@ -92,13 +130,16 @@ def _smart_read_dataframe(
         try:
             return pd.read_json(BytesIO(raw_bytes))
         except ValueError:
-            # JSON Lines (one object per line) is also common.
             return pd.read_json(BytesIO(raw_bytes), lines=True)
 
     if is_parquet_extension:
         return pd.read_parquet(BytesIO(raw_bytes))
 
     delimiter = detect_delimiter(raw_bytes)
+
+    if len(raw_bytes) > CHUNKED_READ_THRESHOLD_BYTES:
+        return _read_csv_in_chunks(raw_bytes, delimiter)
+
     return pd.read_csv(
         BytesIO(raw_bytes), sep=delimiter, low_memory=False
     )
@@ -121,9 +162,12 @@ def run_pipeline(
 
     raw_bytes = storage.read_bytes(job_id, "raw.csv")
     if delimiter:
-        df = pd.read_csv(
-            BytesIO(raw_bytes), sep=delimiter, low_memory=False
-        )
+        if len(raw_bytes) > CHUNKED_READ_THRESHOLD_BYTES:
+            df = _read_csv_in_chunks(raw_bytes, delimiter)
+        else:
+            df = pd.read_csv(
+                BytesIO(raw_bytes), sep=delimiter, low_memory=False
+            )
     else:
         df = _smart_read_dataframe(raw_bytes)
 

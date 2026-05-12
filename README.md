@@ -1,4 +1,4 @@
-# DataPolish
+# Data Polish
 
 > An AI-augmented data engineering pipeline that ingests messy real-world tabular data, profiles it deterministically, lets an LLM propose cleaning rules in a strict typed schema, applies them through deterministic safety gates, and ships a validated clean dataset plus a full audit trail.
 

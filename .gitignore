@@ -45,3 +45,4 @@ reports/*.json
 
 # AWS SAM build artifacts
 .aws-sam/
+docs/blaze_vision.md

@@ -1,6 +1,6 @@
 # AWS Deployment Guide
 
-Deploy DataPolish as an AWS Lambda function triggered by S3 uploads.
+Deploy Data Polish as an AWS Lambda function triggered by S3 uploads.
 Free-tier: well under monthly limits for portfolio-scale usage.
 
 ## Architecture
@@ -12,7 +12,7 @@ You upload a CSV
 s3://datapolish-raw-<account>/incoming.csv
        |
        v   (S3 event)
-DataPolish Lambda (container)
+Data Polish Lambda (container)
        |
        v
 s3://datapolish-cleaned-<account>/cleaned/incoming_cleaned.parquet

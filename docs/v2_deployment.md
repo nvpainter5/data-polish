@@ -1,4 +1,4 @@
-# Deploying DataPolish v2
+# Deploying Data Polish v2
 
 Two free-tier services, one public URL. End-to-end deploy time: ~25 minutes.
 
@@ -8,10 +8,10 @@ Two free-tier services, one public URL. End-to-end deploy time: ~25 minutes.
                               user's browser
                                    |
                                    v
-       https://datapolish.streamlit.app   (Streamlit Community Cloud)
+       https://data-polish.streamlit.app   (Streamlit Community Cloud)
                                    |
-                                   v   (HTTPS, Bearer-style X-User-ID)
-       https://datapolish-api.onrender.com   (Render Web Service)
+                                   v   (HTTPS, Bearer JWT)
+       https://data-polish-api.onrender.com   (Render Web Service)
                                    |
                   +----------------+----------------+
                   v                                 v

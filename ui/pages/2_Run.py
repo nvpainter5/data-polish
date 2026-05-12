@@ -12,7 +12,7 @@ import streamlit as st  # noqa: E402
 from api_client import get_job, run_job  # noqa: E402
 from auth_helpers import require_auth  # noqa: E402
 
-st.set_page_config(page_title="Run — DataPolish", layout="wide")
+st.set_page_config(page_title="Run — Data Polish", layout="wide")
 
 require_auth()
 
@@ -71,20 +71,12 @@ if job["status"] == "failed":
 # status == 'uploaded' — show the run form.
 # --------------------------------------------------------------------------- #
 
-st.markdown("### Optional: custom instructions")
-st.caption(
-    "Free-text steering for the LLM. The instructions are added to the "
-    "system prompt so the model factors them into the rules it proposes. "
-    "Examples: *be conservative on date columns*, *don't touch the address "
-    "fields*, *focus on case standardization*."
-)
-
 custom = st.text_area(
-    "Custom instructions",
+    "Custom instructions (optional)",
     height=120,
     max_chars=500,
-    placeholder="(optional) e.g. 'be conservative on free-text fields'",
-    label_visibility="collapsed",
+    placeholder="e.g. be conservative on date columns, focus on case standardization",
+    help="Free-text steering added to the LLM system prompt.",
 )
 
 st.markdown("---")
@@ -126,15 +118,9 @@ if st.session_state.get("run_complete"):
         f"{s.get('columns', 0)} columns."
     )
 
-    col1, col2 = st.columns([1, 4])
-    with col1:
-        if st.button("View results →", type="primary"):
-            st.session_state["run_complete"] = False
-            st.switch_page("pages/3_Results.py")
-    with col2:
-        st.caption(
-            "See the audit, before/after samples, the LLM plan, and the profile."
-        )
+    if st.button("View results →", type="primary"):
+        st.session_state["run_complete"] = False
+        st.switch_page("pages/3_Results.py")
 
     with st.expander("Run summary"):
         st.json(s)

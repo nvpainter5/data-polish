@@ -1,4 +1,4 @@
-"""Thin httpx wrapper around the DataPolish FastAPI backend.
+"""Thin httpx wrapper around the Data Polish FastAPI backend.
 
 Only the UI imports this. Keeping a single client module means changing
 the API base URL or adding auth headers (v2.4) is a one-file edit.
@@ -15,15 +15,85 @@ import streamlit as st
 API_BASE = os.environ.get("DATAPOLISH_API_BASE", "http://localhost:8000")
 
 
-def _auth_headers() -> dict[str, str]:
-    """Auth header sent on every API call.
+class APIError(Exception):
+    """Friendly error carrying the API's `detail` message instead of the
+    raw httpx status-line, so the UI can show users something useful."""
 
-    For v2.4 MVP we use a simple X-User-ID header populated from the
-    Streamlit session. v2.6 will replace this with a JWT signed by a
-    shared secret once we deploy off-localhost.
+    def __init__(self, detail: str, status_code: int | None = None) -> None:
+        super().__init__(detail)
+        self.detail = detail
+        self.status_code = status_code
+
+
+def _raise_for_status(r: httpx.Response) -> None:
+    """Convert HTTP errors into APIError with the server's detail message."""
+    if r.is_success:
+        return
+    try:
+        detail = r.json().get("detail") or r.text
+    except Exception:  # noqa: BLE001
+        detail = r.text or f"HTTP {r.status_code}"
+    raise APIError(detail, status_code=r.status_code)
+
+
+def _auth_headers() -> dict[str, str]:
+    """Send the signed JWT as Authorization: Bearer ...
+
+    The API decodes it, verifies the signature + expiry, and looks up
+    the user. The old X-User-ID fallback was removed in v3.7 — if there's
+    no access_token in session state, the request goes unauthenticated
+    and the API will 401.
     """
-    username = st.session_state.get("username")
-    return {"X-User-ID": username} if username else {}
+    token = st.session_state.get("access_token")
+    if token:
+        return {"Authorization": f"Bearer {token}"}
+    return {}
+
+
+def register(username: str, email: str, name: str, password: str) -> dict:
+    return _post(
+        "/auth/register",
+        json={
+            "username": username,
+            "email": email,
+            "name": name,
+            "password": password,
+        },
+    )
+
+
+def login(username_or_email: str, password: str) -> dict:
+    return _post(
+        "/auth/login",
+        json={
+            "username_or_email": username_or_email,
+            "password": password,
+        },
+    )
+
+
+def me() -> dict:
+    return _get("/auth/me")
+
+
+def magic_request(email: str) -> dict:
+    return _post("/auth/magic/request", json={"email": email})
+
+
+def magic_verify(email: str, code: str) -> dict:
+    return _post("/auth/magic/verify", json={"email": email, "code": code})
+
+
+def get_my_activity() -> list[dict]:
+    """Return the current user's recent audit events."""
+    # _get expects a dict but the endpoint returns a list. Use httpx
+    # directly to handle the list response.
+    headers = _auth_headers()
+    r = httpx.get(
+        f"{API_BASE}/users/me/activity", headers=headers, timeout=30
+    )
+    _raise_for_status(r)
+    return r.json()
 
 
 def _get(path: str, **kwargs: Any) -> dict:
@@ -31,7 +101,7 @@ def _get(path: str, **kwargs: Any) -> dict:
     r = httpx.get(
         f"{API_BASE}{path}", timeout=30, headers=headers, **kwargs
     )
-    r.raise_for_status()
+    _raise_for_status(r)
     return r.json()
 
 
@@ -41,7 +111,7 @@ def _post(path: str, **kwargs: Any) -> dict:
     r = httpx.post(
         f"{API_BASE}{path}", timeout=timeout, headers=headers, **kwargs
     )
-    r.raise_for_status()
+    _raise_for_status(r)
     return r.json()
 
 
@@ -86,6 +156,42 @@ def upload_from_s3(
         "region": region or None,
     }
     return _post(f"/jobs/{job_id}/upload-s3", json=payload)
+
+
+def upload_from_gcs(
+    job_id: str,
+    bucket: str,
+    blob_name: str,
+    *,
+    service_account_json: str | None = None,
+) -> dict:
+    payload = {
+        "bucket": bucket,
+        "blob_name": blob_name,
+        "service_account_json": service_account_json or None,
+    }
+    return _post(f"/jobs/{job_id}/upload-gcs", json=payload)
+
+
+def upload_from_azure(
+    job_id: str,
+    account_name: str,
+    container: str,
+    blob_name: str,
+    *,
+    connection_string: str | None = None,
+    account_key: str | None = None,
+    sas_token: str | None = None,
+) -> dict:
+    payload = {
+        "account_name": account_name,
+        "container": container,
+        "blob_name": blob_name,
+        "connection_string": connection_string or None,
+        "account_key": account_key or None,
+        "sas_token": sas_token or None,
+    }
+    return _post(f"/jobs/{job_id}/upload-azure", json=payload)
 
 
 def run_job(

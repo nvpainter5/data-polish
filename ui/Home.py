@@ -1,4 +1,4 @@
-"""DataPolish v2 — landing page (login + workflow overview).
+"""Data Polish v3 — landing page with API-backed auth.
 
 Run with:
     streamlit run ui/Home.py
@@ -9,172 +9,191 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# Make `from api_client import ...` work for sibling pages too.
+# Make sibling modules importable.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import streamlit as st  # noqa: E402
-import streamlit_authenticator as stauth  # noqa: E402
 
-from api_client import API_BASE, healthz  # noqa: E402
-from auth_helpers import load_auth_config, save_auth_config  # noqa: E402
-
-st.set_page_config(page_title="DataPolish", layout="wide")
-
-# --------------------------------------------------------------------------- #
-# Auth gate — must run before any other UI or API calls.
-# --------------------------------------------------------------------------- #
-
-config = load_auth_config()
-# load_auth_config now always returns a dict — it auto-creates an empty
-# config in deployed environments so the Register tab works on first visit.
-
-authenticator = stauth.Authenticate(
-    config["credentials"],
-    config["cookie"]["name"],
-    config["cookie"]["key"],
-    config["cookie"]["expiry_days"],
+import api_client as api  # noqa: E402
+from auth_helpers import (  # noqa: E402
+    clear_session,
+    is_authenticated,
+    set_session,
 )
 
-# Render Login + Register tabs while not authenticated. After login they
-# disappear and the main page renders.
-status = st.session_state.get("authentication_status")
-if status is not True:
-    st.title("DataPolish")
-    st.markdown(
-        "Log in or register to use the AI-augmented data cleaning pipeline."
+st.set_page_config(page_title="Data Polish", layout="wide")
+
+
+# --------------------------------------------------------------------------- #
+# Auth gate.
+# --------------------------------------------------------------------------- #
+
+if not is_authenticated():
+    st.title("Data Polish")
+    st.markdown("**AI-augmented data cleaning. Upload, review, export.**")
+
+    tab_login, tab_magic, tab_register = st.tabs(
+        ["Log in", "Magic link", "Register"]
     )
 
-    tab_login, tab_register = st.tabs(["Login", "Register"])
-
     with tab_login:
-        authenticator.login(location="main")
-        if st.session_state.get("authentication_status") is False:
-            st.error("Username or password is incorrect.")
-        elif st.session_state.get("authentication_status") is None:
-            st.caption(
-                "Don't have an account? Use the Register tab."
+        with st.form("login_form", clear_on_submit=False):
+            identifier = st.text_input(
+                "Username or email",
+                help="Use either — both work.",
             )
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Log in", type="primary")
+            st.caption(
+                "Forgot which email you used? Try your username instead. "
+                "Or use the **Magic link** tab to sign in with an emailed code."
+            )
+        if submitted:
+            try:
+                auth_response = api.login(identifier, password)
+            except api.APIError as exc:
+                st.error(exc.detail)
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"Login error: {exc}")
+            else:
+                set_session(auth_response)
+                st.rerun()
+
+    with tab_magic:
+        st.caption(
+            "Skip the password. We'll email you a 6-digit code that signs you in."
+        )
+
+        # Two-step flow: enter email -> paste code. We use session_state
+        # to remember which step we're on between reruns.
+        magic_email = st.session_state.get("magic_pending_email", "")
+
+        if not magic_email:
+            with st.form("magic_request_form", clear_on_submit=False):
+                m_email = st.text_input("Email")
+                m_submitted = st.form_submit_button(
+                    "Email me a sign-in code", type="primary"
+                )
+            if m_submitted:
+                try:
+                    api.magic_request(m_email)
+                except api.APIError as exc:
+                    st.error(exc.detail)
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"Couldn't send code: {exc}")
+                else:
+                    st.session_state["magic_pending_email"] = m_email
+                    st.rerun()
+        else:
+            st.info(
+                f"If an account exists for **{magic_email}**, a code is "
+                "on its way. Check your inbox (and spam folder)."
+            )
+            with st.form("magic_verify_form", clear_on_submit=False):
+                m_code = st.text_input(
+                    "6-digit code", max_chars=6, placeholder="123456"
+                )
+                m_verify = st.form_submit_button("Sign in", type="primary")
+            if m_verify:
+                try:
+                    auth_response = api.magic_verify(magic_email, m_code)
+                except api.APIError as exc:
+                    st.error(exc.detail)
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"Sign-in failed: {exc}")
+                else:
+                    st.session_state.pop("magic_pending_email", None)
+                    set_session(auth_response)
+                    st.rerun()
+
+            if st.button("Use a different email", key="magic_reset"):
+                st.session_state.pop("magic_pending_email", None)
+                st.rerun()
 
     with tab_register:
-        st.caption(
-            "Create an account. Username + password get stored locally "
-            "in `auth_config.yaml` (gitignored). Passwords are hashed "
-            "with bcrypt — never stored in plain text."
-        )
-        # streamlit-authenticator's register_user signature has shifted
-        # across releases (pre_authorization vs pre_authorized vs none).
-        # Probe with a minimal call first; fall back to even simpler
-        # signatures if the kwargs aren't accepted.
-        try:
+        with st.form("register_form", clear_on_submit=False):
+            r_username = st.text_input(
+                "Username", help="2-32 chars: letters, digits, _ . -"
+            )
+            r_email = st.text_input("Email")
+            r_name = st.text_input("Display name (optional)")
+            r_password = st.text_input(
+                "Password", type="password", help="At least 8 characters"
+            )
+            r_submitted = st.form_submit_button("Create account", type="primary")
+        if r_submitted:
             try:
-                result = authenticator.register_user(
-                    location="main", captcha=False
+                auth_response = api.register(
+                    r_username, r_email, r_name or r_username, r_password
                 )
-            except TypeError:
-                result = authenticator.register_user(location="main")
+            except api.APIError as exc:
+                st.error(exc.detail)
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"Registration error: {exc}")
+            else:
+                set_session(auth_response)
+                st.success("Account created. Logged in.")
+                st.rerun()
 
-            # Newer versions return (email, username, name); older may return
-            # something else or None. Treat any non-empty leading value as
-            # registration success.
-            if result and isinstance(result, tuple) and result[0]:
-                save_auth_config(config)
-                st.success(
-                    "Registered. Switch to the **Login** tab to sign in."
-                )
-        except Exception as exc:  # noqa: BLE001
-            st.error(str(exc))
+    # Trust note under the login form.
+    st.divider()
+    st.caption(
+        "🔒 **Your data is yours.** Passwords are bcrypt-hashed — we never "
+        "see or store them in plain text. Connections are HTTPS in production. "
+        "Uploaded files are scoped to your account and never shared with "
+        "other users."
+    )
 
     st.stop()
 
-# --------------------------------------------------------------------------- #
-# Logged in.
-# --------------------------------------------------------------------------- #
 
 # --------------------------------------------------------------------------- #
-# Logged in.
+# Logged-in body.
 # --------------------------------------------------------------------------- #
 
-st.title("DataPolish")
-st.markdown(
-    "**An AI-augmented data engineering pipeline for messy real-world data.**"
-)
-
-# --------------------------------------------------------------------------- #
-# API health badge — instantly tells the user if the backend is up.
-# --------------------------------------------------------------------------- #
+st.title("Data Polish")
+st.markdown("**AI-augmented data cleaning. Upload, review, export.**")
 
 with st.sidebar:
     st.markdown(
         f"**Logged in as:** `{st.session_state.get('username')}`  \n"
-        f"({st.session_state.get('name')})"
+        f"({st.session_state.get('display_name')})"
     )
-    authenticator.logout("Logout", "sidebar")
-
-    with st.expander("Reset password"):
-        try:
-            if authenticator.reset_password(
-                st.session_state["username"], location="main"
-            ):
-                save_auth_config(config)
-                st.success("Password updated.")
-        except Exception as exc:  # noqa: BLE001
-            st.error(str(exc))
+    if st.button("Log out", type="secondary"):
+        clear_session()
+        st.rerun()
 
     st.divider()
 
     st.markdown("### API status")
     try:
-        info = healthz()
+        info = api.healthz()
         st.success(f"{info['service']} v{info['version']}")
-        st.caption(f"`{API_BASE}`")
+        st.caption(f"`{api.API_BASE}`")
     except Exception as exc:  # noqa: BLE001
         st.error("Backend not reachable")
-        st.caption(f"`{API_BASE}`")
+        st.caption(f"`{api.API_BASE}`")
         st.caption(f"{type(exc).__name__}: {exc}")
-        st.caption(
-            "Run `uvicorn api.main:app --reload --port 8000` in another "
-            "terminal."
-        )
 
     st.divider()
     st.markdown(
         "**Workflow**\n\n"
-        "1. **Upload** a CSV\n"
-        "2. **Run** the pipeline (optionally with your own instructions)\n"
-        "3. **Results** — see what was applied, what was skipped, and why\n"
+        "1. **Upload** a file\n"
+        "2. **Run** the pipeline\n"
+        "3. **Results** — audit, quality score, before/after\n"
     )
-
-# --------------------------------------------------------------------------- #
-# Body — what is this thing.
-# --------------------------------------------------------------------------- #
 
 st.markdown(
     """
-Upload a CSV. The pipeline:
-
-1. **Profiles** every column deterministically — dtype, nulls, casing
-   patterns, top values, length stats.
-2. **Asks an LLM** (Llama 3.3 70B via Groq) to propose cleaning rules in
-   a typed JSON schema with a fixed set of operations.
-3. **Applies** each rule through deterministic safety gates that
-   re-validate the rule against the actual column profile before it
-   touches the data.
-4. **Returns** clean parquet plus a full audit log — every applied,
-   skipped, and rejected rule, with reasons.
-
-The structural decision: the LLM proposes; deterministic code disposes.
-That's how this differs from "stuff data into ChatGPT" demos.
+1. **Upload** a CSV, TSV, JSON, or parquet — locally or from S3.
+2. **Run** the pipeline. An LLM proposes cleaning rules; safety gates
+   validate each one before any data mutates.
+3. **Review** the audit, quality score, and LLM suggestions. Download cleaned parquet.
 """
 )
 
 if "job_id" in st.session_state:
     st.info(
-        f"Current job in this session: `{st.session_state['job_id']}`. "
-        "Continue at the **Run** or **Results** page."
+        f"Active job: `{st.session_state['job_id']}` — continue at "
+        "**Run** or **Results**."
     )
-
-st.markdown("---")
-st.caption(
-    "v2.0 — single-user, local upload. Auth, cloud storage connectors, "
-    "outlier detection, and custom rule steering coming next."
-)

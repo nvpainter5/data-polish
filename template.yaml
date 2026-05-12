@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: >-
-  DataPolish — AI-augmented data cleaning pipeline. CSV uploads to the raw
+  Data Polish — AI-augmented data cleaning pipeline. CSV uploads to the raw
   bucket trigger a Lambda that profiles, lets an LLM propose cleaning rules,
   applies them through deterministic safety gates, and writes parquet plus an
   audit JSON to the cleaned bucket.

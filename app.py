@@ -1,4 +1,4 @@
-"""Streamlit dashboard for DataPolish — visualizes past pipeline runs.
+"""Streamlit dashboard for Data Polish — visualizes past pipeline runs.
 
 Run with:
     streamlit run app.py
@@ -26,7 +26,7 @@ RAW = PROJECT_ROOT / "data" / "raw"
 CLEANED = PROJECT_ROOT / "data" / "cleaned"
 
 st.set_page_config(
-    page_title="DataPolish",
+    page_title="Data Polish",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -60,7 +60,7 @@ def list_sorted(pattern: str) -> list[Path]:
 # Header.
 # --------------------------------------------------------------------------- #
 
-st.title("DataPolish")
+st.title("Data Polish")
 st.markdown(
     "**An AI-augmented data engineering pipeline.** Messy CSV in → "
     "deterministic profile → LLM proposes cleaning rules → safety gates "
@@ -135,7 +135,7 @@ with st.sidebar:
     st.divider()
     st.markdown(
         "### About\n"
-        "DataPolish is a portfolio project demonstrating production AI "
+        "Data Polish is a portfolio project demonstrating production AI "
         "engineering patterns: profile-first prompting, structured outputs "
         "as a contract, and LLM-proposes-deterministic-code-disposes."
     )
